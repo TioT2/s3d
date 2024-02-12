@@ -151,15 +151,15 @@ impl<'a> RenderContext<'a> {
             let ine = ie.wrapping_sub(2 * dx);
 
             while dx != 0 {
+                pptr = pptr.wrapping_add(sx);
+                pptr.write(color);
+                dx -= 1;
                 if f < std::mem::transmute(isize::MIN) {
                     pptr = pptr.wrapping_add(sy);
                     f = f.wrapping_add(ine);
                 } else {
                     f = f.wrapping_add(ie);
                 }
-                pptr = pptr.wrapping_add(sx);
-                pptr.write(color);
-                dx -= 1;
             }
         } else {
             let ie = 2 * dx;
@@ -167,15 +167,16 @@ impl<'a> RenderContext<'a> {
             let ine = ie.wrapping_sub(2 * dy);
 
             while dy != 0 {
+                pptr = pptr.wrapping_add(sy);
+                pptr.write(color);
+                dy -= 1;
+
                 if f < std::mem::transmute(isize::MIN) {
                     pptr = pptr.wrapping_add(sx);
                     f = f.wrapping_add(ine);
                 } else {
                     f = f.wrapping_add(ie);
                 }
-                pptr = pptr.wrapping_add(sy);
-                pptr.write(color);
-                dy -= 1;
             }
         }
     }
@@ -184,7 +185,7 @@ impl<'a> RenderContext<'a> {
         *self.surface_data.add(y * self.surface_width + x) = color;
     }
 
-    unsafe fn draw_polygon_unchecked(&self, polygon: &[Vec2<usize>], bottom_index: usize, color: u32) {
+    unsafe fn draw_polygon_border_unchecked(&self, polygon: &[Vec2<usize>], bottom_index: usize, color: u32) {
         // actually, render face (wireframe at least now)
         let mut fp = polygon.as_ptr();
         let fpe = fp.add(polygon.len() - 1);
@@ -196,6 +197,11 @@ impl<'a> RenderContext<'a> {
         }
 
         self.set_pixel_unchecked(polygon.get_unchecked(bottom_index).x, polygon.get_unchecked(bottom_index).y, 0xFF000000);
+    }
+
+    unsafe fn draw_polygon_unchecked(&self, polygon: &[Vec2<usize>], bottom_index: usize, color: u32) {
+        // Do some scanline
+        todo!();
     }
 
     pub fn draw(&mut self, primitive: &Primitive) {
@@ -282,7 +288,7 @@ impl<'a> RenderContext<'a> {
                     }
 
                     // Perform rendering
-                    self.draw_polygon_unchecked(&face_polygon, bottom_index, face_color);
+                    self.draw_polygon_border_unchecked(&face_polygon, bottom_index, face_color);
                 }
 
                 face_polygon.clear();
