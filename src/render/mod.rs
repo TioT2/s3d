@@ -7,6 +7,7 @@ pub struct Primitive {
     pub color: u32,
 }
 
+#[derive(Copy, Clone)]
 pub struct CameraLocation {
     pub direction: Vec3f,
     pub right: Vec3f,
@@ -15,6 +16,7 @@ pub struct CameraLocation {
     pub at: Vec3f,
 }
 
+#[derive(Copy, Clone)]
 pub struct CameraProjection {
     pub size: Vec2f,
     pub near: f32,
@@ -127,109 +129,164 @@ pub struct RenderContext<'a> {
 }
 
 impl<'a> RenderContext<'a> {
-    unsafe fn set_pixel_unchecked(&mut self, x: usize, y: usize, color: u32) {
-        *self.surface_data.add(y * self.surface_width + x) = color;
-    }
-
     /// Line displaying function
-    unsafe fn draw_line_unchecked(&mut self, mut x1: usize, mut y1: usize, mut x2: usize, mut y2: usize, color: u32) {
-        if y1 > y2 {
-            let tmp = y1;
-            y1 = y2;
-            y2 = tmp;
-            let tmp = x1;
-            x1 = x2;
-            x2 = tmp;
-        }
-        let dy: usize = y2 - y1;
-        let (dx, sx): (usize, usize) = if x2 < x1 {
+    unsafe fn draw_line_unchecked(&self, x1: usize, y1: usize, x2: usize, y2: usize, color: u32) {
+        let (mut dy, sy): (usize, usize) = if y2 < y1 {
+            (y1 - y2, self.surface_width.wrapping_neg())
+        } else {
+            (y2 - y1, self.surface_width)
+        };
+        let (mut dx, sx): (usize, usize) = if x2 < x1 {
             (x1 - x2, 1usize.wrapping_neg())
         } else {
             (x2 - x1, 1usize)
         };
-        let mut x = x1;
-        let mut y = y1;
 
-        self.set_pixel_unchecked(x, y, color);
+        let mut pptr = self.surface_data.wrapping_add(y1 * self.surface_width + x1);
+        pptr.write(color);
 
         if dx >= dy {
-            let mut f = (2 * dy).wrapping_sub(dx);
             let ie = 2 * dy;
+            let mut f = ie.wrapping_sub(dx);
             let ine = ie.wrapping_sub(2 * dx);
-            let mut count = dx;
 
-            while count != 0 {
+            while dx != 0 {
                 if f < std::mem::transmute(isize::MIN) {
-                    y += 1;
+                    pptr = pptr.wrapping_add(sy);
                     f = f.wrapping_add(ine);
                 } else {
                     f = f.wrapping_add(ie);
                 }
-                x = x.wrapping_add(sx);
-                count -= 1;
-                self.set_pixel_unchecked(x, y, color);
+                pptr = pptr.wrapping_add(sx);
+                pptr.write(color);
+                dx -= 1;
             }
         } else {
-            let mut f = (2 * dx).wrapping_sub(dy);
             let ie = 2 * dx;
+            let mut f = ie.wrapping_sub(dy);
             let ine = ie.wrapping_sub(2 * dy);
-            let mut count = dy;
 
-            while count != 0 {
+            while dy != 0 {
                 if f < std::mem::transmute(isize::MIN) {
-                    x = x.wrapping_add(sx);
+                    pptr = pptr.wrapping_add(sx);
                     f = f.wrapping_add(ine);
                 } else {
                     f = f.wrapping_add(ie);
                 }
-                y += 1;
-                count -= 1;
-                self.set_pixel_unchecked(x, y, color);
+                pptr = pptr.wrapping_add(sy);
+                pptr.write(color);
+                dy -= 1;
             }
         }
     }
 
+    unsafe fn set_pixel_unchecked(&self, x: usize, y: usize, color: u32) {
+        *self.surface_data.add(y * self.surface_width + x) = color;
+    }
+
+    unsafe fn draw_polygon_unchecked(&self, polygon: &[Vec2<usize>], bottom_index: usize, color: u32) {
+        // actually, render face (wireframe at least now)
+        let mut fp = polygon.as_ptr();
+        let fpe = fp.add(polygon.len() - 1);
+
+        self.draw_line_unchecked(fp.read().x, fp.read().y, fpe.read().x, fpe.read().y, color);
+        while fp < fpe {
+            self.draw_line_unchecked(fp.read().x, fp.read().y, fp.add(1).read().x, fp.add(1).read().y, color);
+            fp = fp.add(1);
+        }
+
+        self.set_pixel_unchecked(polygon.get_unchecked(bottom_index).x, polygon.get_unchecked(bottom_index).y, 0xFF000000);
+    }
+
     pub fn draw(&mut self, primitive: &Primitive) {
         unsafe {
+            let cam_loc = *self.render.camera.get_location();
+
+            let proj = *self.render.camera.get_projection();
+            let proj_inv_near = 1.0 / proj.near;
+            let proj_inv_far = 1.0 / proj.far;
+
+            let proj_ext_min = usize::min(self.render.camera.extent.x, self.render.camera.extent.y) as f32;
+            let proj_x_x = 2.0 * proj.near / proj.size.x * self.render.camera.extent.y as f32 / proj_ext_min;
+            let proj_y_y = -2.0 * proj.near / proj.size.y * self.render.camera.extent.x as f32 / proj_ext_min;
+
+            let cam_right = cam_loc.right;
+            let cam_up = cam_loc.up;
+            let cam_dir = cam_loc.direction;
+
+            let cam_loc_right = cam_loc.location ^ cam_right;
+            let cam_loc_up = cam_loc.location ^ cam_up;
+            let cam_loc_dir = cam_loc.location ^ cam_dir;
+
+            let proj_x_add = self.surface_width as f32 / 2.0;
+            let proj_x_mul = proj_x_add * proj_x_x;
+
+            let proj_y_add = self.surface_height as f32 / 2.0;
+            let proj_y_mul = proj_y_add * proj_y_y;
+
             let color = primitive.color << 8;
             let positions = primitive.positions.as_ptr();
             let normals = primitive.normals.as_ptr();
 
             let mut index = primitive.indices.as_ptr();
-            let end = index.add(primitive.indices.len());
+            let index_end = index.add(primitive.indices.len());
 
-            // Walk through faces
-            while index < end {
-                let last_position_index = index.add(*index as usize + 2);
-                let _normal_index = *index.add(1);
-                index = index.add(2);
+            // Projected face data
+            let mut face_polygon = Vec::<Vec2<usize>>::with_capacity(10);
 
-                let mut i1 = *last_position_index.sub(1) as usize;
-                let mut i2 = *index as usize;
+            // Walk through faces, build 'em, then render.
+            while index < index_end {
+                // next begin
+                let face_end = index.add(*index as usize + 2);
+                let normal = *normals.add(*index.add(1) as usize + 1);
+                let light = (1.0 / (normal.x + normal.y + normal.z).clamp(0.1, 1.0)) as u8;
+                let face_color: [u8; 4] = std::mem::transmute(color);
+                let face_color: u32 = std::mem::transmute([
+                    face_color[0] / light,
+                    face_color[1] / light,
+                    face_color[2] / light,
+                    face_color[3] / light,
+                ]);
 
-                while index < last_position_index {
-                    let mut begin = self.render.camera.view_projection_matrix.transform_4x4(*positions.add(i1));
-                    let mut end = self.render.camera.view_projection_matrix.transform_4x4(*positions.add(i2));
+                // Iterate through vertices
+                'face_rendering: {
+                    index = index.add(2);
 
-                    if begin.z > 0.0 && begin.z < 1.0 && end.z > 0.0 && end.z < 1.0 {
-                        begin.x = (begin.x + 1.0) / 2.0 * self.surface_width as f32;
-                        begin.y = (begin.y + 1.0) / 2.0 * self.surface_height as f32;
+                    // detect projected polygon bottom
+                    let mut bottom_y = usize::MAX;
+                    let mut bottom_index = 0usize;
+                    let mut i = 0usize;
 
-                        end.x = (end.x + 1.0) / 2.0 * self.surface_width as f32;
-                        end.y = (end.y + 1.0) / 2.0 * self.surface_height as f32;
+                    // Build face polygon
+                    while index < face_end {
+                        let pt = *positions.add(*index as usize);
 
-                        let begin = (begin.x as usize, begin.y as usize);
-                        let end = (end.x as usize, end.y as usize);
+                        let z = 1.0 / (pt.x * cam_dir.x   + pt.y * cam_dir.y   + pt.z * cam_dir.z   - cam_loc_dir);
+                        let px = ((pt.x * cam_right.x + pt.y * cam_right.y + pt.z * cam_right.z - cam_loc_right) * z * proj_x_mul + proj_x_add).to_int_unchecked::<usize>();
+                        let py = ((pt.x * cam_up.x    + pt.y * cam_up.y    + pt.z * cam_up.z    - cam_loc_up   ) * z * proj_y_mul + proj_y_add).to_int_unchecked::<usize>();
 
-                        if begin.0 < self.surface_width && begin.1 < self.surface_height && end.0 < self.surface_width && end.1 < self.surface_height {
-                            self.draw_line_unchecked(begin.0, begin.1, end.0, end.1, color);
+                        // face clipping
+                        if px >= self.surface_width || py >= self.surface_height || z >= proj_inv_near || z <= proj_inv_far {
+                            break 'face_rendering;
                         }
+
+                        face_polygon.push(Vec2::<usize> { x: px, y: py });
+
+                        if py < bottom_y {
+                            bottom_y = py;
+                            bottom_index = i;
+                        }
+
+                        i += 1;
+                        index = index.add(1);
                     }
 
-                    index = index.add(1);
-                    i1 = i2;
-                    i2 = *index as usize;
+                    // Perform rendering
+                    self.draw_polygon_unchecked(&face_polygon, bottom_index, face_color);
                 }
+
+                face_polygon.clear();
+                index = face_end;
             }
         }
     }

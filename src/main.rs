@@ -86,7 +86,7 @@ impl Timer {
             delta_time: 0.01,
             fps: 30.0,
             fps_counter: 0,
-            fps_duration: 3.0,
+            fps_duration: 1.0,
         }
     }
 
@@ -215,7 +215,7 @@ fn main() {
     let video = sdl.video().unwrap();
     let mut event_pump = sdl.event_pump().unwrap();
 
-    let window = video.window("TioT2 Wire 3D", 800, 600)
+    let mut window = video.window("TioT2 Wire 3D", 800, 600)
         .resizable()
         .build().unwrap();
 
@@ -261,6 +261,15 @@ fn main() {
         // Camera control
         'camera_control: {
             let state = event_pump.keyboard_state();
+
+            if state.is_scancode_pressed(sdl2::keyboard::Scancode::F11) {
+                if window.fullscreen_state() == sdl2::video::FullscreenType::Off {
+                    _ = window.set_fullscreen(sdl2::video::FullscreenType::True);
+                } else {
+                    _ = window.set_fullscreen(sdl2::video::FullscreenType::Off);
+                }
+            }
+
             let move_axis = Vec3f::new(
                 (state.is_scancode_pressed(sdl2::keyboard::Scancode::D) as i32 - state.is_scancode_pressed(sdl2::keyboard::Scancode::A) as i32) as f32,
                 (state.is_scancode_pressed(sdl2::keyboard::Scancode::R) as i32 - state.is_scancode_pressed(sdl2::keyboard::Scancode::F) as i32) as f32,
@@ -320,7 +329,7 @@ fn main() {
             _ = surface.flush(dst_surface);
         }
 
-        if frame % 1000 == 0 {
+        if frame % 333 == 0 {
             println!("{}", timer.get_fps());
         }
         frame += 1;

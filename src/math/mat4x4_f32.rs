@@ -127,9 +127,9 @@ impl Mat4x4<f32> {
     pub fn projection_frustum(l: f32, r: f32, b: f32, t: f32, n: f32, f: f32) -> Mat4x4<f32> {
         Self {
             data: [
-                [2.0 * n / (r - l),   0.0,                 0.0,                    0.0],
-                [0.0,                -2.0 * n / (t - b),   0.0,                    0.0],
-                [(r + l) / (r - l), (t + b) / (t - b), -(f + n) / (f - n),        -1.0],
+                [2.0 * n / (r - l),   0.0,                  0.0,                   0.0],
+                [0.0,                -2.0 * n / (t - b),    0.0,                   0.0],
+                [(r + l) / (r - l),   (t + b) / (t - b),   -(f + n) / (f - n),    -1.0],
                 [0.0,                 0.0,                 -2.0 * n * f / (f - n), 0.0]
             ]
         }
@@ -176,7 +176,7 @@ impl Mat4x4<f32> {
             y: (v.x * self.data[0][1] + v.y * self.data[1][1] + v.z * self.data[2][1] + self.data[3][1]) / w,
             z: (v.x * self.data[0][2] + v.y * self.data[1][2] + v.z * self.data[2][2] + self.data[3][2]) / w,
         }
-    } // fn transform_4x4
+    } // En transform_4x4
 }
 
 // file mat4x4_f32.rs

@@ -100,6 +100,13 @@ macro_rules! vecn_impl_dot_operator {
                 vecn_operator_on_variadic!(+, $(self.$x * rhs.$x),*)
             }
         }
+
+        impl<T: Copy + Clone + core::ops::Mul<T, Output = T> + core::ops::Add<T, Output = T>> core::ops::BitXor<$type<T>> for $type<T> {
+            type Output = T;
+            fn bitxor(self, rhs: $type<T>) -> T {
+                vecn_operator_on_variadic!(+, $(self.$x * rhs.$x),*)
+            }
+        }
     }
 }
 
