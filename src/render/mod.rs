@@ -64,15 +64,23 @@ impl Camera {
     pub fn set(&mut self, location: &Vec3f, at: &Vec3f, approx_up: &Vec3f) {
         let view = Mat4x4::view(location, at, approx_up);
 
-        self.location.right     = Vec3f::new(view.data[0][0], view.data[1][0], view.data[2][0]);
-        self.location.up        = Vec3f::new(view.data[0][1], view.data[1][1], view.data[2][1]);
-        self.location.direction = Vec3f::new(view.data[0][2], view.data[1][2], view.data[2][2]);
+        self.location.right     = Vec3f::new( view.data[0][0],  view.data[1][0],  view.data[2][0]);
+        self.location.up        = Vec3f::new( view.data[0][1],  view.data[1][1],  view.data[2][1]);
+        self.location.direction = Vec3f::new(-view.data[0][2], -view.data[1][2], -view.data[2][2]);
 
         self.location.location = *location;
         self.location.at = *at;
 
         self.view_matrix = view;
         self.view_projection_matrix = self.view_matrix * self.projection_matrix;
+    }
+
+    pub fn get_location(&self) -> &CameraLocation {
+        &self.location
+    }
+
+    pub fn get_projection(&self) -> &CameraProjection {
+        &self.projection
     }
 
     pub fn set_projection(&mut self, near: f32, far: f32, size: Vec2f) {
@@ -119,7 +127,7 @@ pub struct RenderContext<'a> {
 }
 
 impl<'a> RenderContext<'a> {
-    unsafe fn put_pixel_unchecked(&mut self, x: usize, y: usize, color: u32) {
+    unsafe fn set_pixel_unchecked(&mut self, x: usize, y: usize, color: u32) {
         *self.surface_data.add(y * self.surface_width + x) = color;
     }
 
@@ -142,7 +150,7 @@ impl<'a> RenderContext<'a> {
         let mut x = x1;
         let mut y = y1;
 
-        self.put_pixel_unchecked(x, y, color);
+        self.set_pixel_unchecked(x, y, color);
 
         if dx >= dy {
             let mut f = (2 * dy).wrapping_sub(dx);
@@ -159,7 +167,7 @@ impl<'a> RenderContext<'a> {
                 }
                 x = x.wrapping_add(sx);
                 count -= 1;
-                self.put_pixel_unchecked(x, y, color);
+                self.set_pixel_unchecked(x, y, color);
             }
         } else {
             let mut f = (2 * dx).wrapping_sub(dy);
@@ -176,14 +184,14 @@ impl<'a> RenderContext<'a> {
                 }
                 y += 1;
                 count -= 1;
-                self.put_pixel_unchecked(x, y, color);
+                self.set_pixel_unchecked(x, y, color);
             }
         }
     }
 
     pub fn draw(&mut self, primitive: &Primitive) {
         unsafe {
-            let color = 0xFF000000 | primitive.color;
+            let color = primitive.color << 8;
             let positions = primitive.positions.as_ptr();
             let normals = primitive.normals.as_ptr();
 
@@ -192,38 +200,36 @@ impl<'a> RenderContext<'a> {
 
             // Walk through faces
             while index < end {
-                let last_position_index = index.add(*index as usize + 1);
+                let last_position_index = index.add(*index as usize + 2);
                 let _normal_index = *index.add(1);
                 index = index.add(2);
 
-                // Connect first and last
-                {
-                    let mut begin = self.render.camera.view_projection_matrix.transform_4x4(*positions.add(*index as usize));
-                    let mut end = self.render.camera.view_projection_matrix.transform_4x4(*positions.add(*last_position_index as usize));
+                let mut i1 = *last_position_index.sub(1) as usize;
+                let mut i2 = *index as usize;
 
-                    begin.x = (begin.x + 1.0) / 2.0 * self.surface_width as f32;
-                    begin.y = (begin.y + 1.0) / 2.0 * self.surface_height as f32;
-
-                    end.x = (end.x + 1.0) / 2.0 * self.surface_width as f32;
-                    end.y = (end.y + 1.0) / 2.0 * self.surface_height as f32;
-
-                    self.draw_line_unchecked(begin.x as usize, begin.y as usize, end.x as usize, end.y as usize, color);
-                }
-                // All another
                 while index < last_position_index {
-                    let mut begin = self.render.camera.view_projection_matrix.transform_4x4(*positions.add(*index as usize));
-                    let mut end = self.render.camera.view_projection_matrix.transform_4x4(*positions.add(*index as usize + 1));
+                    let mut begin = self.render.camera.view_projection_matrix.transform_4x4(*positions.add(i1));
+                    let mut end = self.render.camera.view_projection_matrix.transform_4x4(*positions.add(i2));
 
-                    begin.x = (begin.x + 1.0) / 2.0 * self.surface_width as f32;
-                    begin.y = (begin.y + 1.0) / 2.0 * self.surface_height as f32;
+                    if begin.z > 0.0 && begin.z < 1.0 && end.z > 0.0 && end.z < 1.0 {
+                        begin.x = (begin.x + 1.0) / 2.0 * self.surface_width as f32;
+                        begin.y = (begin.y + 1.0) / 2.0 * self.surface_height as f32;
 
-                    end.x = (end.x + 1.0) / 2.0 * self.surface_width as f32;
-                    end.y = (end.y + 1.0) / 2.0 * self.surface_height as f32;
+                        end.x = (end.x + 1.0) / 2.0 * self.surface_width as f32;
+                        end.y = (end.y + 1.0) / 2.0 * self.surface_height as f32;
 
-                    self.draw_line_unchecked(begin.x as usize, begin.y as usize, end.x as usize, end.y as usize, color);
+                        let begin = (begin.x as usize, begin.y as usize);
+                        let end = (end.x as usize, end.y as usize);
+
+                        if begin.0 < self.surface_width && begin.1 < self.surface_height && end.0 < self.surface_width && end.1 < self.surface_height {
+                            self.draw_line_unchecked(begin.0, begin.1, end.0, end.1, color);
+                        }
+                    }
+
                     index = index.add(1);
+                    i1 = i2;
+                    i2 = *index as usize;
                 }
-                index = index.add(1);
             }
         }
     }
@@ -240,12 +246,18 @@ impl Render {
         }
     }
 
-    pub fn lock_camera(&mut self) -> &mut Camera {
+    pub fn get_camera_mut(&mut self) -> &mut Camera {
         &mut self.camera
     }
 
     pub fn start<'a>(&'a mut self, surface: &'a mut dyn crate::window::Surface<'a>) -> RenderContext<'a> {
-        surface.get_data_mut().fill(0xFF000000);
+        // Clear canvas
+        unsafe {
+            let data = surface.get_data_mut();
+
+            std::ptr::write_bytes(data.as_mut_ptr(), 0x00, data.len());
+        }
+
         self.camera.resize(surface.get_extent());
         RenderContext {
             render: self,
